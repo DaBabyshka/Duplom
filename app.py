@@ -10,12 +10,57 @@ from matplotlib.widgets import Cursor
 import webbrowser
 from matplotlib.ticker import MaxNLocator
 
-# Цветовая палитра
-BACKGROUND_COLOR = "#eaf4fb"
-BUTTON_COLOR = "#a3c9f1"
-HIGHLIGHT_COLOR = "#6fa8dc"
-FONT = ("Helvetica", 12)
-ACCENT_COLOR = "#3d85c6"
+# Обновленная цветовая палитра
+BACKGROUND_COLOR = "#f0f8ff"  # Светло-голубой фон
+BUTTON_COLOR = "#4a90e2"  # Яркий синий для основных кнопок
+HIGHLIGHT_COLOR = "#3a7bd5"  # Темнее синий для hover-эффекта
+DELETE_COLOR = "#e74c3c"  # Красный для кнопки удаления
+DELETE_HIGHLIGHT = "#c0392b"  # Темнее красный для hover-эффекта
+ACCENT_COLOR = "#3d85c6"  # Акцентный цвет для графиков
+TEXT_COLOR = "#2c3e50"  # Темно-синий для текста
+BUTTON_FRAME_COLOR = "#e1f0fa"  # Светлый фон для панели кнопок
+
+FONT = ("Segoe UI", 11)  # Более современный шрифт
+FONT_BOLD = ("Segoe UI", 11, "bold")
+
+
+# Стилизованная кнопка
+class ModernButton(tk.Button):
+    def __init__(self, master=None, **kwargs):
+        super().__init__(master, **kwargs)
+        self.default_bg = kwargs.get('bg', BUTTON_COLOR)
+        self.hover_bg = kwargs.get('activebackground', HIGHLIGHT_COLOR)
+        self.default_fg = kwargs.get('fg', 'white')
+        self.active_fg = kwargs.get('activeforeground', 'white')
+
+        self.config(
+            relief=tk.FLAT,
+            bd=0,
+            padx=15,
+            pady=6,
+            font=FONT_BOLD,
+            bg=self.default_bg,
+            fg=self.default_fg,
+            activebackground=self.hover_bg,
+            activeforeground=self.active_fg
+        )
+
+        self.bind("<Enter>", self.on_enter)
+        self.bind("<Leave>", self.on_leave)
+
+    def on_enter(self, e):
+        self.config(bg=self.hover_bg)
+
+    def on_leave(self, e):
+        self.config(bg=self.default_bg)
+
+
+# Стилизованная кнопка удаления
+class DeleteButton(ModernButton):
+    def __init__(self, master=None, **kwargs):
+        kwargs['bg'] = DELETE_COLOR
+        kwargs['activebackground'] = DELETE_HIGHLIGHT
+        super().__init__(master, **kwargs)
 
 
 # Подключение к базе данных
@@ -56,6 +101,20 @@ def add_city_to_db(city, prices, description, wiki_link):
     conn.commit()
     conn.close()
     messagebox.showinfo("Успех", f"Город {city} успешно добавлен в базу данных.")
+
+
+def delete_city_from_db(city):
+    try:
+        conn = sqlite3.connect("real_estate.db")
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM prices WHERE city = ?", (city,))
+        conn.commit()
+        conn.close()
+        messagebox.showinfo("Успех", f"Город {city} успешно удален из базы данных.")
+        return True
+    except Exception as e:
+        messagebox.showerror("Ошибка", f"Не удалось удалить город: {str(e)}")
+        return False
 
 
 def open_wiki(url):
@@ -128,6 +187,7 @@ def plot_forecast(city):
             link_button.config(state="disabled")
 
         show_bar_chart_button.config(state="normal", command=lambda: show_bar_chart(city))
+        delete_city_btn.config(state="normal", command=lambda: confirm_delete_city(city))
 
     except Exception as e:
         messagebox.showerror("Ошибка", f"Произошла ошибка: {str(e)}")
@@ -142,6 +202,9 @@ def show_bar_chart(city):
             return
 
         fig, ax = plt.subplots(figsize=(8, 6), dpi=100)
+        fig.patch.set_facecolor(BACKGROUND_COLOR)
+        ax.set_facecolor(BACKGROUND_COLOR)
+
         bars = ax.bar(df["year"], df["average_price"], color=ACCENT_COLOR)
 
         ax.set_title(f"Цены за м² в {city} по годам", fontsize=14)
@@ -167,18 +230,36 @@ def show_bar_chart(city):
         chart_window = tk.Toplevel(root)
         chart_window.title(f"Диаграмма цен - {city}")
         chart_window.geometry("800x600")
+        chart_window.configure(bg=BACKGROUND_COLOR)
 
         canvas = FigureCanvasTkAgg(fig, master=chart_window)
         canvas.draw()
         canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-        # Кнопка закрытия
-        close_button = tk.Button(chart_window, text="Закрыть", command=chart_window.destroy,
-                                 bg=BUTTON_COLOR, font=FONT)
+        # Стилизованная кнопка закрытия
+        close_button = ModernButton(chart_window, text="Закрыть", command=chart_window.destroy)
         close_button.pack(pady=10)
 
     except Exception as e:
         messagebox.showerror("Ошибка", f"Произошла ошибка: {str(e)}")
+
+
+# Подтверждение удаления города
+def confirm_delete_city(city):
+    if messagebox.askyesno("Подтверждение", f"Вы уверены, что хотите удалить город {city} из базы данных?"):
+        if delete_city_from_db(city):
+            update_city_list()
+            # Очищаем график и информацию о городе
+            for widget in frame_graph.winfo_children():
+                if isinstance(widget, FigureCanvasTkAgg):
+                    widget.get_tk_widget().destroy()
+                elif widget not in [description_label, link_button, show_bar_chart_button, control_frame, button_frame]:
+                    widget.destroy()
+
+            description_label.config(text="Выберите город для отображения данных")
+            link_button.config(state="disabled")
+            show_bar_chart_button.config(state="disabled")
+            delete_city_btn.config(state="disabled")
 
 
 # Обработка выбора города
@@ -214,7 +295,7 @@ def add_city():
     header = tk.Frame(add_city_window, bg=HIGHLIGHT_COLOR)
     header.pack(fill=tk.X)
     tk.Label(header, text="Добавление нового города", bg=HIGHLIGHT_COLOR,
-             fg="white", font=("Helvetica", 14, "bold")).pack(pady=10)
+             fg="white", font=("Segoe UI", 14, "bold")).pack(pady=10)
 
     # Основной контейнер
     container = tk.Frame(add_city_window, bg=BACKGROUND_COLOR)
@@ -246,8 +327,8 @@ def add_city():
     wiki_entry = create_entry_row(container, "Ссылка на Википедию:")
 
     # Кнопки
-    button_frame = tk.Frame(container, bg=BACKGROUND_COLOR)
-    button_frame.pack(fill=tk.X, pady=20)
+    button_frame = tk.Frame(container, bg=BUTTON_FRAME_COLOR)
+    button_frame.pack(fill=tk.X, pady=20, padx=5, ipady=10)
 
     def save_city():
         try:
@@ -275,11 +356,11 @@ def add_city():
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при сохранении: {str(e)}")
 
-    tk.Button(button_frame, text="Сохранить", command=save_city,
-              bg=HIGHLIGHT_COLOR, fg="white", font=FONT, width=15).pack(side=tk.RIGHT, padx=5)
+    save_btn = ModernButton(button_frame, text="Сохранить", command=save_city)
+    save_btn.pack(side=tk.RIGHT, padx=10)
 
-    tk.Button(button_frame, text="Отмена", command=add_city_window.destroy,
-              bg=BUTTON_COLOR, font=FONT, width=15).pack(side=tk.RIGHT)
+    cancel_btn = ModernButton(button_frame, text="Отмена", command=add_city_window.destroy, bg="#95a5a6")
+    cancel_btn.pack(side=tk.RIGHT)
 
 
 def update_city_list():
@@ -296,34 +377,51 @@ root.title("Прогноз цен на недвижимость в города�
 root.configure(bg=BACKGROUND_COLOR)
 root.geometry("1000x750")
 
+# Установка иконки (если есть)
+try:
+    root.iconbitmap("home_icon.ico")  # Можно добавить свою иконку
+except:
+    pass
+
 # Стилизация
 style = ttk.Style()
+style.theme_use("clam")
 style.configure("TFrame", background=BACKGROUND_COLOR)
-style.configure("TLabel", background=BACKGROUND_COLOR, font=FONT)
-style.configure("TEntry", font=FONT)
+style.configure("TLabel", background=BACKGROUND_COLOR, font=FONT, foreground=TEXT_COLOR)
+style.configure("TEntry", font=FONT, fieldbackground="white")
+style.configure("TButton", font=FONT_BOLD, padding=6)
 
 # Левый фрейм: выбор города
-frame_left = tk.Frame(root, bg=BACKGROUND_COLOR)
+frame_left = tk.Frame(root, bg=BUTTON_FRAME_COLOR, bd=2, relief=tk.RIDGE)
 frame_left.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
 
-tk.Label(frame_left, text="Выберите город:", bg=BACKGROUND_COLOR, font=FONT).pack(anchor="w")
+tk.Label(frame_left, text="Выберите город:", bg=BUTTON_FRAME_COLOR,
+         font=FONT_BOLD, fg=TEXT_COLOR).pack(anchor="w", pady=(5, 0))
 
 city_search_var = tk.StringVar()
 city_search_entry = ttk.Entry(frame_left, textvariable=city_search_var)
-city_search_entry.pack(fill=tk.X, pady=5)
+city_search_entry.pack(fill=tk.X, pady=5, padx=5)
 city_search_entry.bind("<KeyRelease>", filter_cities)
 
 city_listbox = tk.Listbox(frame_left, height=30, exportselection=False, font=FONT,
-                          selectbackground=HIGHLIGHT_COLOR)
-city_listbox.pack(fill=tk.BOTH, expand=True)
+                          selectbackground=HIGHLIGHT_COLOR, selectforeground="white",
+                          bd=0, highlightthickness=0)
+city_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 city_listbox.bind("<ButtonRelease-1>", on_city_select)
 
-add_city_button = tk.Button(frame_left, text="Добавить город", bg=HIGHLIGHT_COLOR,
-                            fg="white", font=FONT, command=add_city)
-add_city_button.pack(fill=tk.X, pady=10)
+button_frame_left = tk.Frame(frame_left, bg=BUTTON_FRAME_COLOR)
+button_frame_left.pack(fill=tk.X, pady=(5, 10), padx=5)
+
+add_city_btn = ModernButton(button_frame_left, text="Добавить город")
+add_city_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+add_city_btn.config(command=add_city)
+
+delete_city_btn = DeleteButton(button_frame_left, text="Удалить город")
+delete_city_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+delete_city_btn.config(state="disabled")
 
 # Правый фрейм: график
-frame_graph = tk.Frame(root, bg=BACKGROUND_COLOR)
+frame_graph = tk.Frame(root, bg=BACKGROUND_COLOR, bd=2, relief=tk.RIDGE)
 frame_graph.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
 
 # Элементы управления графиком
@@ -331,19 +429,20 @@ control_frame = tk.Frame(frame_graph, bg=BACKGROUND_COLOR)
 control_frame.pack(fill=tk.X)
 
 description_label = tk.Label(frame_graph, text="Выберите город для отображения данных",
-                             bg=BACKGROUND_COLOR, font=FONT, wraplength=800, justify=tk.LEFT)
+                             bg=BACKGROUND_COLOR, font=FONT, wraplength=800,
+                             justify=tk.LEFT, fg=TEXT_COLOR)
 description_label.pack(pady=10)
 
-button_frame = tk.Frame(frame_graph, bg=BACKGROUND_COLOR)
-button_frame.pack(fill=tk.X)
+button_frame = tk.Frame(frame_graph, bg=BUTTON_FRAME_COLOR)
+button_frame.pack(fill=tk.X, pady=5, padx=5, ipady=5)
 
-link_button = tk.Button(button_frame, text="Перейти на Википедию", bg=BUTTON_COLOR,
-                        font=FONT, state="disabled")
+link_button = ModernButton(button_frame, text="Перейти на Википедию")
 link_button.pack(side=tk.LEFT, padx=5)
+link_button.config(state="disabled")
 
-show_bar_chart_button = tk.Button(button_frame, text="Показать диаграмму", bg=BUTTON_COLOR,
-                                  font=FONT, state="disabled")
+show_bar_chart_button = ModernButton(button_frame, text="Показать диаграмму")
 show_bar_chart_button.pack(side=tk.LEFT, padx=5)
+show_bar_chart_button.config(state="disabled")
 
 # Загрузка данных
 all_cities = get_cities()
