@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import sqlite3
 import pandas as pd
 from sklearn.linear_model import LinearRegression
@@ -9,6 +9,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.widgets import Cursor
 import webbrowser
 from matplotlib.ticker import MaxNLocator
+import ast
 
 # Обновленная цветовая палитра
 BACKGROUND_COLOR = "#f0f8ff"  # Светло-голубой фон
@@ -19,12 +20,13 @@ DELETE_HIGHLIGHT = "#c0392b"  # Темнее красный для hover-эфф�
 ACCENT_COLOR = "#3d85c6"  # Акцентный цвет для графиков
 TEXT_COLOR = "#2c3e50"  # Темно-синий для текста
 BUTTON_FRAME_COLOR = "#e1f0fa"  # Светлый фон для панели кнопок
+BUTTON_BORDER_COLOR = "#2c3e50"  # Цвет контура кнопок
 
 FONT = ("Segoe UI", 11)  # Более современный шрифт
 FONT_BOLD = ("Segoe UI", 11, "bold")
 
 
-# Стилизованная кнопка
+# Стилизованная кнопка с закругленными углами и контуром
 class ModernButton(tk.Button):
     def __init__(self, master=None, **kwargs):
         super().__init__(master, **kwargs)
@@ -42,11 +44,24 @@ class ModernButton(tk.Button):
             bg=self.default_bg,
             fg=self.default_fg,
             activebackground=self.hover_bg,
-            activeforeground=self.active_fg
+            activeforeground=self.active_fg,
+            highlightbackground=BUTTON_BORDER_COLOR,
+            highlightthickness=0,
+            borderwidth=0
         )
 
+        # Закругленные углы
+        self.bind("<Configure>", self._configure_button)
         self.bind("<Enter>", self.on_enter)
         self.bind("<Leave>", self.on_leave)
+
+    def _configure_button(self, event=None):
+        self.config(highlightthickness=0)
+        self.update()
+        # Создаем эффект закругленных углов
+        self.config(borderwidth=0, highlightthickness=0)
+        self['border'] = 0
+        self['highlightthickness'] = 0
 
     def on_enter(self, e):
         self.config(bg=self.hover_bg)
@@ -122,6 +137,59 @@ def open_wiki(url):
         webbrowser.open(url)
     else:
         messagebox.showwarning("Ошибка", "Ссылка на Википедию отсутствует.")
+
+
+# Функция для загрузки данных из TXT файла
+def load_from_txt():
+    file_path = filedialog.askopenfilename(
+        title="Выберите файл с данными",
+        filetypes=(("Текстовые файлы", "*.txt"), ("Все файлы", "*.*"))
+    )
+
+    if not file_path:
+        return
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            content = file.read()
+
+            # Пытаемся преобразовать содержимое файла в список кортежей
+            try:
+                data = ast.literal_eval(content)
+                if not isinstance(data, list):
+                    raise ValueError("Файл должен содержать список кортежей")
+            except (SyntaxError, ValueError) as e:
+                messagebox.showerror("Ошибка", f"Неверный формат файла: {str(e)}")
+                return
+
+            conn = sqlite3.connect("real_estate.db")
+            cursor = conn.cursor()
+
+            added_cities = set()
+
+            for record in data:
+                if len(record) != 5:
+                    messagebox.showerror("Ошибка",
+                                         "Каждая запись должна содержать 5 элементов: город, год, цена, описание, ссылка")
+                    conn.close()
+                    return
+
+                city, year, price, description, wiki_link = record
+                cursor.execute("""
+                    INSERT OR REPLACE INTO prices (city, year, average_price, description, wiki_link)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (city, year, price, description, wiki_link))
+
+                added_cities.add(city)
+
+            conn.commit()
+            conn.close()
+
+            messagebox.showinfo("Успех", f"Данные для городов {', '.join(added_cities)} успешно загружены!")
+            update_city_list()
+
+    except Exception as e:
+        messagebox.showerror("Ошибка", f"Произошла ошибка при загрузке файла: {str(e)}")
 
 
 # Построение основного графика с прогнозами
@@ -371,6 +439,83 @@ def update_city_list():
         city_listbox.insert(tk.END, city)
 
 
+# Функция для отображения справки
+def show_help():
+    help_window = tk.Toplevel(root)
+    help_window.title("Справка по приложению")
+    help_window.geometry("700x600")
+    help_window.configure(bg=BACKGROUND_COLOR)
+    help_window.resizable(False, False)
+
+    # Создаем Notebook (вкладки)
+    notebook = ttk.Notebook(help_window)
+    notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    # Вкладка о формате файла
+    file_frame = tk.Frame(notebook, bg=BACKGROUND_COLOR)
+    notebook.add(file_frame, text="Формат TXT файла")
+
+    tk.Label(file_frame, text="Пример содержимого TXT файла:",
+             bg=BACKGROUND_COLOR, font=FONT_BOLD, anchor="w").pack(fill=tk.X, pady=10, padx=10)
+
+    example_text = """[
+    ("Москва", 2020, 195000, "Столица России", "https://ru.wikipedia.org/wiki/Москва"),
+    ("Москва", 2021, 210000, "Столица России", "https://ru.wikipedia.org/wiki/Москва"),
+    ("Москва", 2022, 230000, "Столица России", "https://ru.wikipedia.org/wiki/Москва"),
+    ("Санкт-Петербург", 2020, 120000, "Северная столица", "https://ru.wikipedia.org/wiki/Санкт-Петербург"),
+    ("Санкт-Петербург", 2021, 125000, "Северная столица", "https://ru.wikipedia.org/wiki/Санкт-Петербург")
+]"""
+
+    text_widget = tk.Text(file_frame, height=15, width=80, font=("Consolas", 10), wrap=tk.WORD)
+    text_widget.insert(tk.END, example_text)
+    text_widget.config(state="disabled")
+    text_widget.pack(padx=10, pady=5, fill=tk.BOTH, expand=True)
+
+    tk.Label(file_frame, text="Файл должен содержать список кортежей, где каждый кортеж состоит из:",
+             bg=BACKGROUND_COLOR, font=FONT, anchor="w").pack(fill=tk.X, padx=10)
+
+    tk.Label(file_frame,
+             text="1. Название города\n2. Год (2020-2024)\n3. Средняя цена за м²\n4. Описание города\n5. Ссылка на Википедию",
+             bg=BACKGROUND_COLOR, font=FONT, anchor="w", justify=tk.LEFT).pack(fill=tk.X, padx=20, pady=5)
+
+    # Вкладка о функционале
+    func_frame = tk.Frame(notebook, bg=BACKGROUND_COLOR)
+    notebook.add(func_frame, text="Функционал приложения")
+
+    info_text = """Приложение для анализа цен на недвижимость в городах России:
+
+Основные функции:
+1. Просмотр динамики цен по годам
+2. Прогноз цен на 2025 год (базовый, оптимистичный и пессимистичный)
+3. Добавление новых городов в базу данных
+4. Удаление городов из базы данных
+5. Загрузка данных из текстового файла
+6. Просмотр дополнительной информации о городах
+
+График показывает:
+- Исторические данные (точки с фактическими ценами)
+- Базовый тренд (линейная регрессия)
+- Оптимистичный прогноз (+15% к данным)
+- Пессимистичный прогноз (-15% к данным)
+- Прогнозируемые цены на 2025 год
+
+Кнопки:
+- 'Добавить город' - ручной ввод данных о новом городе
+- 'Удалить город' - удаление выбранного города из базы
+- 'Загрузить из TXT' - импорт данных из текстового файла
+- 'Перейти на Википедию' - открытие страницы города
+- 'Показать диаграмму' - отображение столбчатой диаграммы цен"""
+
+    text_widget = tk.Text(func_frame, height=25, width=80, font=FONT, wrap=tk.WORD)
+    text_widget.insert(tk.END, info_text)
+    text_widget.config(state="disabled")
+    text_widget.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+    # Кнопка закрытия
+    close_btn = ModernButton(help_window, text="Закрыть", command=help_window.destroy)
+    close_btn.pack(pady=10)
+
+
 # --- Создание основного интерфейса ---
 root = tk.Tk()
 root.title("Прогноз цен на недвижимость в городах России")
@@ -419,6 +564,16 @@ add_city_btn.config(command=add_city)
 delete_city_btn = DeleteButton(button_frame_left, text="Удалить город")
 delete_city_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 delete_city_btn.config(state="disabled")
+
+# Кнопка загрузки из файла
+load_txt_btn = ModernButton(button_frame_left, text="Загрузить из TXT", bg="#2ecc71", activebackground="#27ae60")
+load_txt_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+load_txt_btn.config(command=load_from_txt)
+
+# Кнопка справки
+help_btn = ModernButton(button_frame_left, text="Справка", bg="#9b59b6", activebackground="#8e44ad")
+help_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+help_btn.config(command=show_help)
 
 # Правый фрейм: график
 frame_graph = tk.Frame(root, bg=BACKGROUND_COLOR, bd=2, relief=tk.RIDGE)
