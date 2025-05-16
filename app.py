@@ -10,65 +10,53 @@ import webbrowser
 from matplotlib.ticker import MaxNLocator
 import ast
 import json
+from tkinter import font as tkfont
+import matplotlib.patches as mpatches
+from matplotlib import animation
 import time
 from PIL import Image, ImageTk
-from matplotlib.colors import LinearSegmentedColormap
-import matplotlib.animation as animation
-from tkinter import font as tkfont
 
 
-# Настройки темы
-class Theme:
+# Цветовая палитра
+class SmoothTheme:
     def __init__(self):
-        self.light = {
-            "bg": "#f0f8ff",
-            "button": "#4a90e2",
-            "button_hover": "#3a7bd5",
-            "delete": "#e74c3c",
-            "delete_hover": "#c0392b",
-            "accent": "#3d85c6",
-            "text": "#2c3e50",
-            "panel": "#e1f0fa",
-            "border": "#2c3e50",
-            "entry_bg": "white",
-            "graph_bg": "white",
-            "graph_text": "black",
-            "highlight": "#f5f9ff"
+        self.colors = {
+            "bg": "#2a2a2e",
+            "panel": "#3a3a3f",
+            "accent": "#5a7bb5",
+            "text": "#e0e0e0",
+            "text_secondary": "#b0b0b0",
+            "entry_bg": "#4a4a4f",
+            "border": "#5a5a5f",
+            "graph_bg": "#2a2a2e",
+            "graph_grid": "#4a4a4f",
+            "button": "#4a4a4f",
+            "button_hover": "#5a5a5f",
+            "danger": "#9b4a4a",
+            "success": "#4a9b6a",
+            "highlight": "#3a4a6a",
+            "tooltip_bg": "#3a3a3f",
+            "tooltip_text": "#e0e0e0",
+            "card_bg": "#3a3a3f",
+            "card_border": "#5a5a5f"
         }
-        self.dark = {
-            "bg": "#1a1a2e",
-            "button": "#16213e",
-            "button_hover": "#0f3460",
-            "delete": "#e94560",
-            "delete_hover": "#d23350",
-            "accent": "#3d85c6",
-            "text": "#e6e6e6",
-            "panel": "#16213e",
-            "border": "#0f3460",
-            "entry_bg": "#2a2a4a",
-            "graph_bg": "#1a1a2e",
-            "graph_text": "white",
-            "highlight": "#2a2a4a"
-        }
-        self.current = self.light
-
-    def toggle(self):
-        self.current = self.dark if self.current == self.light else self.light
-        return self.current
 
 
-theme = Theme()
+theme = SmoothTheme()
 
-FONT = ("Segoe UI", 11)
-FONT_BOLD = ("Segoe UI", 11, "bold")
-FONT_TITLE = ("Segoe UI", 14, "bold")
+# Шрифты
+FONT = ("Segoe UI", 10)
+FONT_BOLD = ("Segoe UI", 10, "bold")
+FONT_TITLE = ("Segoe UI", 12, "bold")
+FONT_SMALL = ("Segoe UI", 9)
+FONT_LARGE = ("Segoe UI", 14, "bold")
 
 
 # Анимированная кнопка
-class ModernButton(tk.Canvas):
-    def __init__(self, master=None, text="", command=None, width=140, height=40,
-                 bg_color=theme.current["button"], fg_color="white",
-                 hover_color=theme.current["button_hover"], radius=10, font=FONT_BOLD, **kwargs):
+class SmoothButton(tk.Canvas):
+    def __init__(self, master=None, text="", command=None, width=120, height=36,
+                 bg_color=theme.colors["button"], fg_color=theme.colors["text"],
+                 hover_color=theme.colors["button_hover"], radius=6, font=FONT, **kwargs):
         super().__init__(master, width=width, height=height,
                          highlightthickness=0, bd=0, **kwargs)
         self.command = command
@@ -78,43 +66,21 @@ class ModernButton(tk.Canvas):
         self.radius = radius
         self.text = text
         self.font = font
-        self.is_pressed = False
+        self.after_id = None
+        self.current_bg = bg_color
 
         self.bind("<Enter>", self.on_enter)
         self.bind("<Leave>", self.on_leave)
-        self.bind("<ButtonPress-1>", self.on_press)
-        self.bind("<ButtonRelease-1>", self.on_release)
+        self.bind("<Button-1>", self.on_click)
 
         self.draw_button()
 
     def draw_button(self):
         self.delete("all")
-        # Фон кнопки
         self.create_rounded_rect(0, 0, self.winfo_reqwidth(), self.winfo_reqheight(),
-                                 radius=self.radius, fill=self.bg_color, outline="")
-
-        # Разбиваем текст на несколько строк если он слишком длинный
-        if len(self.text) > 15:
-            words = self.text.split()
-            lines = []
-            current_line = words[0]
-            for word in words[1:]:
-                if len(current_line) + len(word) + 1 <= 15:
-                    current_line += " " + word
-                else:
-                    lines.append(current_line)
-                    current_line = word
-            lines.append(current_line)
-            text = "\n".join(lines)
-            font = (self.font[0], self.font[1] - 1)  # Уменьшаем шрифт для многострочного текста
-        else:
-            text = self.text
-            font = self.font
-
-        # Текст
+                                 radius=self.radius, fill=self.current_bg, outline="")
         self.create_text(self.winfo_reqwidth() / 2, self.winfo_reqheight() / 2,
-                         text=text, fill=self.fg_color, font=font,
-                         width=self.winfo_reqwidth() - 20)  # Добавляем перенос по словам
+                         text=self.text, fill=self.fg_color, font=self.font)
 
     def create_rounded_rect(self, x1, y1, x2, y2, radius=10, **kwargs):
         points = [
@@ -133,130 +99,135 @@ class ModernButton(tk.Canvas):
         ]
         return self.create_polygon(points, **kwargs, smooth=True)
 
+    def animate_color(self, start_color, end_color, steps=10):
+        if self.after_id:
+            self.after_cancel(self.after_id)
+
+        start_r = int(start_color[1:3], 16)
+        start_g = int(start_color[3:5], 16)
+        start_b = int(start_color[5:7], 16)
+
+        end_r = int(end_color[1:3], 16)
+        end_g = int(end_color[3:5], 16)
+        end_b = int(end_color[5:7], 16)
+
+        step_r = (end_r - start_r) / steps
+        step_g = (end_g - start_g) / steps
+        step_b = (end_b - start_b) / steps
+
+        def update_step(step=0):
+            if step <= steps:
+                r = int(start_r + step * step_r)
+                g = int(start_g + step * step_g)
+                b = int(start_b + step * step_b)
+                self.current_bg = f"#{r:02x}{g:02x}{b:02x}"
+                self.draw_button()
+                self.after_id = self.after(10, update_step, step + 1)
+
+        update_step()
+
     def on_enter(self, event=None):
-        self.current_color = self.hover_color
-        self.draw_button()
+        self.animate_color(self.bg_color, self.hover_color)
 
     def on_leave(self, event=None):
-        if not self.is_pressed:
-            self.current_color = self.bg_color
-            self.draw_button()
+        self.animate_color(self.current_bg, self.bg_color)
 
-    def on_press(self, event=None):
-        self.is_pressed = True
-        self.scale("all", self.winfo_reqwidth() / 2, self.winfo_reqheight() / 2, 0.95, 0.95)
-
-    def on_release(self, event=None):
-        self.is_pressed = False
-        self.scale("all", self.winfo_reqwidth() / 2, self.winfo_reqheight() / 2, 1 / 0.95, 1 / 0.95)
-        self.on_enter()
-
+    def on_click(self, event=None):
+        self.current_bg = self.hover_color
+        self.draw_button()
+        self.after(100, lambda: self.animate_color(self.hover_color, self.bg_color))
         if self.command:
             self.command()
 
-    def config(self, **kwargs):
-        if "text" in kwargs:
-            self.text = kwargs["text"]
-            self.draw_button()
-        if "bg" in kwargs or "bg_color" in kwargs:
-            self.bg_color = kwargs.get("bg", kwargs.get("bg_color", self.bg_color))
-            self.current_color = self.bg_color
-            self.draw_button()
-        if "fg" in kwargs or "fg_color" in kwargs:
-            self.fg_color = kwargs.get("fg", kwargs.get("fg_color", self.fg_color))
-            self.draw_button()
-        if "activebackground" in kwargs or "hover_color" in kwargs:
-            self.hover_color = kwargs.get("activebackground", kwargs.get("hover_color", self.hover_color))
-        if "command" in kwargs:
-            self.command = kwargs["command"]
+
+# Карточка с информацией
+class InfoCard(tk.Frame):
+    def __init__(self, master=None, title="", value="", unit="", color=theme.colors["accent"], **kwargs):
+        super().__init__(master, bg=theme.colors["card_bg"], bd=1,
+                         relief=tk.RIDGE, highlightbackground=theme.colors["card_border"],
+                         highlightthickness=1, **kwargs)
+
+        self.title_label = tk.Label(self, text=title, bg=theme.colors["card_bg"],
+                                    fg=theme.colors["text_secondary"], font=FONT_SMALL)
+        self.title_label.pack(pady=(5, 0))
+
+        self.value_label = tk.Label(self, text=value, bg=theme.colors["card_bg"],
+                                    fg=color, font=FONT_LARGE)
+        self.value_label.pack()
+
+        if unit:
+            self.unit_label = tk.Label(self, text=unit, bg=theme.colors["card_bg"],
+                                       fg=theme.colors["text_secondary"], font=FONT_SMALL)
+            self.unit_label.pack(pady=(0, 5))
+
+    def update_value(self, new_value, new_unit=None):
+        self.value_label.config(text=new_value)
+        if new_unit and hasattr(self, 'unit_label'):
+            self.unit_label.config(text=new_unit)
 
 
-# Кнопка удаления
-class DeleteButton(ModernButton):
-    def __init__(self, master=None, **kwargs):
-        kwargs['bg_color'] = theme.current["delete"]
-        kwargs['hover_color'] = theme.current["delete_hover"]
-        super().__init__(master, **kwargs)
-
-
-# Анимированный список
-class AnimatedListbox(tk.Listbox):
+# Список городов с плавной прокруткой
+class CityListbox(tk.Listbox):
     def __init__(self, master=None, **kwargs):
         super().__init__(master, **kwargs)
         self.config(
             font=FONT,
-            selectbackground=theme.current["button_hover"],
+            selectbackground=theme.colors["accent"],
             selectforeground="white",
             bd=0,
             highlightthickness=0,
-            bg=theme.current["panel"],
-            fg=theme.current["text"]
+            bg=theme.colors["panel"],
+            fg=theme.colors["text"],
+            activestyle="none"
         )
-        self.bind("<MouseWheel>", self.on_scroll)
-        self.scroll_speed = 2
-        self.scroll_anim = None
-
-    def on_scroll(self, event):
-        if self.scroll_anim:
-            self.after_cancel(self.scroll_anim)
-
-        if event.delta > 0:
-            self.yview_scroll(-1, "units")
-        else:
-            self.yview_scroll(1, "units")
-
-        # Плавная остановка
-        self.scroll_speed = 5
-        self.decelerate_scroll(event)
-
-    def decelerate_scroll(self, event):
-        if self.scroll_speed > 0:
-            if event.delta > 0:
-                self.yview_scroll(-1, "units")
-            else:
-                self.yview_scroll(1, "units")
-            self.scroll_speed -= 1
-            self.scroll_anim = self.after(20, self.decelerate_scroll, event)
-        else:
-            self.scroll_anim = None
 
 
-# Радиальная анимация загрузки
+# Анимация загрузки
 class LoadingAnimation(tk.Canvas):
-    def __init__(self, master=None, size=50, color=theme.current["button"], **kwargs):
+    def __init__(self, master=None, size=50, color=theme.colors["accent"], **kwargs):
         super().__init__(master, width=size, height=size,
                          highlightthickness=0, bd=0, **kwargs)
         self.size = size
         self.color = color
         self.angle = 0
-        self.arc = None
         self.animation_id = None
         self.start_animation()
 
     def start_animation(self):
         self.delete("all")
-        self.angle = (self.angle + 5) % 360
-        extent = 60  # Длина дуги
+        self.angle = (self.angle + 10) % 360
 
-        # Рисуем фон
-        self.create_oval(5, 5, self.size - 5, self.size - 5,
-                         outline=theme.current["panel"], width=3)
-
-        # Рисуем анимированную дугу
-        self.arc = self.create_arc(5, 5, self.size - 5, self.size - 5,
-                                   start=self.angle, extent=extent,
-                                   style=tk.ARC, outline=self.color, width=3)
+        # Рисуем круговую анимацию
+        self.create_arc(10, 10, self.size - 10, self.size - 10,
+                        start=self.angle, extent=60,
+                        style=tk.ARC, outline=self.color, width=3)
 
         self.animation_id = self.after(50, self.start_animation)
 
     def stop_animation(self):
         if self.animation_id:
             self.after_cancel(self.animation_id)
-            self.animation_id = None
         self.delete("all")
 
 
 # Функции для работы с базой данных
+def create_database():
+    conn = sqlite3.connect("real_estate.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS prices (
+            city TEXT,
+            year INTEGER,
+            average_price REAL,
+            description TEXT,
+            wiki_link TEXT,
+            PRIMARY KEY (city, year)
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
 def get_cities():
     conn = sqlite3.connect("real_estate.db")
     cursor = conn.cursor()
@@ -288,7 +259,7 @@ def add_city_to_db(city, prices, description, wiki_link):
     cursor = conn.cursor()
     for year, price in prices:
         cursor.execute("""
-            INSERT INTO prices (city, year, average_price, description, wiki_link)
+            INSERT OR REPLACE INTO prices (city, year, average_price, description, wiki_link)
             VALUES (?, ?, ?, ?, ?)
         """, (city, year, price, description, wiki_link))
     conn.commit()
@@ -439,13 +410,10 @@ def plot_forecast(city):
     try:
         # Очищаем предыдущий график
         for widget in frame_graph.winfo_children():
-            if isinstance(widget, FigureCanvasTkAgg):
-                widget.get_tk_widget().destroy()
-            elif widget not in [description_label, link_button, show_bar_chart_button, control_frame, button_frame]:
-                widget.destroy()
+            widget.destroy()
 
         # Показываем анимацию загрузки
-        loading = LoadingAnimation(frame_graph, size=100, color=theme.current["accent"])
+        loading = LoadingAnimation(frame_graph, size=80, color=theme.colors["accent"])
         loading.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
         frame_graph.update()
 
@@ -473,87 +441,176 @@ def plot_forecast(city):
         optimistic_price = optimistic_model.predict(year_to_predict)
         pessimistic_price = pessimistic_model.predict(year_to_predict)
 
-        fig, ax = plt.subplots(figsize=(8, 6), dpi=100, facecolor=theme.current["graph_bg"])
-        ax.set_facecolor(theme.current["graph_bg"])
+        # Создаем фигуру
+        fig = plt.figure(figsize=(8, 5), dpi=100, facecolor=theme.colors["graph_bg"])
+        ax = fig.add_subplot(111, facecolor=theme.colors["graph_bg"])
 
-        # Анимированный график
+        # Цвета для графиков
+        colors = {
+            "historical": theme.colors["accent"],
+            "trend": "#6fa54a",
+            "optimistic": "#a56f4a",
+            "pessimistic": "#a54a6f"
+        }
+
+        # Информационное окно
+        info_text = tk.StringVar()
+        info_text.set("Наведите курсор на точки графика для информации")
+
+        info_frame = tk.Frame(frame_graph, bg=theme.colors["tooltip_bg"], padx=10, pady=5)
+        info_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        tk.Label(info_frame, textvariable=info_text, bg=theme.colors["tooltip_bg"],
+                 fg=theme.colors["tooltip_text"], font=FONT_SMALL).pack()
+
+        # Создаем карточки с информацией
+        stats_frame = tk.Frame(frame_graph, bg=theme.colors["bg"])
+        stats_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        # Карточка с текущей ценой
+        last_price = y[-1]
+        current_price_card = InfoCard(stats_frame, title="Текущая цена",
+                                      value=f"{last_price:,.0f}", unit="₽/м²",
+                                      color=theme.colors["accent"])
+        current_price_card.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        # Карточка с прогнозом
+        forecast_card = InfoCard(stats_frame, title="Прогноз на 2025",
+                                 value=f"{predicted_price[0]:,.0f}", unit="₽/м²",
+                                 color=colors["trend"])
+        forecast_card.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        # Карточка с оптимистичным прогнозом
+        optimistic_card = InfoCard(stats_frame, title="Оптимистичный (+15%)",
+                                   value=f"{optimistic_price[0]:,.0f}", unit="₽/м²",
+                                   color=colors["optimistic"])
+        optimistic_card.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        # Карточка с пессимистичным прогнозом
+        pessimistic_card = InfoCard(stats_frame, title="Пессимистичный (-15%)",
+                                    value=f"{pessimistic_price[0]:,.0f}", unit="₽/м²",
+                                    color=colors["pessimistic"])
+        pessimistic_card.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        # Анимированное построение графика
         def animate(i):
             ax.clear()
+
+            # Настройки осей
+            ax.set_facecolor(theme.colors["graph_bg"])
+            for spine in ax.spines.values():
+                spine.set_color(theme.colors["text"])
+            ax.tick_params(colors=theme.colors["text"])
+            ax.grid(True, color=theme.colors["graph_grid"], linestyle='--', alpha=0.5)
+
+            # Постепенное построение графика
             if i < len(df["year"]):
-                ax.plot(df["year"][:i + 1], y[:i + 1], marker='o', color=theme.current["accent"],
-                        label="Исторические данные")
+                current_years = df["year"][:i + 1]
+                current_prices = y[:i + 1]
+                ax.plot(current_years, current_prices, 'o-', color=colors["historical"],
+                        label="Исторические данные", linewidth=2, markersize=6)
             else:
-                ax.plot(df["year"], y, marker='o', color=theme.current["accent"],
-                        label="Исторические данные")
+                ax.plot(df["year"], y, 'o-', color=colors["historical"],
+                        label="Исторические данные", linewidth=2, markersize=6)
 
-                if i < len(df["year"]) + 10:
-                    progress = (i - len(df["year"]) + 1) / 10
-                    ax.plot(df["year"], model.predict(X), linestyle='--', color='green',
-                            alpha=progress, label="Базовый тренд")
+                if i < len(df["year"]) + 15:
+                    progress = min(1, (i - len(df["year"]) + 1) / 15)
+                    ax.plot(df["year"], model.predict(X), '--', color=colors["trend"],
+                            alpha=progress, label="Базовый тренд", linewidth=2)
                 else:
-                    ax.plot(df["year"], model.predict(X), linestyle='--', color='green',
-                            label="Базовый тренд")
+                    ax.plot(df["year"], model.predict(X), '--', color=colors["trend"],
+                            label="Базовый тренд", linewidth=2)
 
-                    if i < len(df["year"]) + 20:
-                        progress = (i - len(df["year"]) - 9) / 10
-                        ax.plot(df["year"], optimistic_model.predict(X), linestyle=':', color='blue',
-                                alpha=progress, label="Оптимистичный прогноз (+15%)")
-                        ax.plot(df["year"], pessimistic_model.predict(X), linestyle=':', color='red',
-                                alpha=progress, label="Пессимистичный прогноз (-15%)")
+                    if i < len(df["year"]) + 30:
+                        progress = min(1, (i - len(df["year"]) - 14) / 15)
+                        ax.plot(df["year"], optimistic_model.predict(X), ':', color=colors["optimistic"],
+                                alpha=progress, label="Оптимистичный (+15%)", linewidth=2)
+                        ax.plot(df["year"], pessimistic_model.predict(X), ':', color=colors["pessimistic"],
+                                alpha=progress, label="Пессимистичный (-15%)", linewidth=2)
                     else:
-                        ax.plot(df["year"], optimistic_model.predict(X), linestyle=':', color='blue',
-                                label="Оптимистичный прогноз (+15%)")
-                        ax.plot(df["year"], pessimistic_model.predict(X), linestyle=':', color='red',
-                                label="Пессимистичный прогноз (-15%)")
+                        ax.plot(df["year"], optimistic_model.predict(X), ':', color=colors["optimistic"],
+                                label="Оптимистичный (+15%)", linewidth=2)
+                        ax.plot(df["year"], pessimistic_model.predict(X), ':', color=colors["pessimistic"],
+                                label="Пессимистичный (-15%)", linewidth=2)
 
-                        if i < len(df["year"]) + 30:
-                            progress = (i - len(df["year"]) - 19) / 10
-                            ax.scatter(2025, predicted_price, color='green',
-                                       alpha=progress, label=f"Прогноз 2025: {predicted_price[0]:.0f} ₽/м²")
-                            ax.scatter(2025, optimistic_price, color='blue',
-                                       alpha=progress, label=f"Оптим. 2025: {optimistic_price[0]:.0f} ₽/м²")
-                            ax.scatter(2025, pessimistic_price, color='red',
-                                       alpha=progress, label=f"Песс. 2025: {pessimistic_price[0]:.0f} ₽/м²")
+                        if i < len(df["year"]) + 45:
+                            progress = min(1, (i - len(df["year"]) - 29) / 15)
+                            ax.scatter(2025, predicted_price, color=colors["trend"], s=100,
+                                       alpha=progress, label=f"2025: {predicted_price[0]:.0f} ₽/м²")
+                            ax.scatter(2025, optimistic_price, color=colors["optimistic"], s=100,
+                                       alpha=progress, label=f"2025 (+15%): {optimistic_price[0]:.0f} ₽/м²")
+                            ax.scatter(2025, pessimistic_price, color=colors["pessimistic"], s=100,
+                                       alpha=progress, label=f"2025 (-15%): {pessimistic_price[0]:.0f} ₽/м²")
                         else:
-                            ax.scatter(2025, predicted_price, color='green',
-                                       label=f"Прогноз 2025: {predicted_price[0]:.0f} ₽/м²")
-                            ax.scatter(2025, optimistic_price, color='blue',
-                                       label=f"Оптим. 2025: {optimistic_price[0]:.0f} ₽/м²")
-                            ax.scatter(2025, pessimistic_price, color='red',
-                                       label=f"Песс. 2025: {pessimistic_price[0]:.0f} ₽/м²")
+                            ax.scatter(2025, predicted_price, color=colors["trend"], s=100,
+                                       label=f"2025: {predicted_price[0]:.0f} ₽/м²")
+                            ax.scatter(2025, optimistic_price, color=colors["optimistic"], s=100,
+                                       label=f"2025 (+15%): {optimistic_price[0]:.0f} ₽/м²")
+                            ax.scatter(2025, pessimistic_price, color=colors["pessimistic"], s=100,
+                                       label=f"2025 (-15%): {pessimistic_price[0]:.0f} ₽/м²")
 
-            ax.set_title(f"Динамика цен в {city} с прогнозом", fontsize=14, color=theme.current["graph_text"])
-            ax.set_xlabel("Год", fontsize=12, color=theme.current["graph_text"])
-            ax.set_ylabel("Цена, ₽/м²", fontsize=12, color=theme.current["graph_text"])
-            ax.grid(True, color='gray' if theme.current == theme.dark else 'lightgray')
-            ax.legend(facecolor=theme.current["graph_bg"], edgecolor=theme.current["graph_bg"],
-                      labelcolor=theme.current["graph_text"])
+            ax.set_title(f"Динамика цен в {city}", fontsize=12, color=theme.colors["text"], pad=10)
+            ax.set_xlabel("Год", fontsize=10, color=theme.colors["text"])
+            ax.set_ylabel("Цена, ₽/м²", fontsize=10, color=theme.colors["text"])
             ax.xaxis.set_major_locator(MaxNLocator(integer=True))
 
-            # Настройка цветов осей
-            ax.spines['bottom'].set_color(theme.current["graph_text"])
-            ax.spines['top'].set_color(theme.current["graph_text"])
-            ax.spines['right'].set_color(theme.current["graph_text"])
-            ax.spines['left'].set_color(theme.current["graph_text"])
-            ax.tick_params(axis='x', colors=theme.current["graph_text"])
-            ax.tick_params(axis='y', colors=theme.current["graph_text"])
+            # Легенда
+            legend = ax.legend(facecolor=theme.colors["graph_bg"], edgecolor='none',
+                               labelcolor=theme.colors["text"],
+                               bbox_to_anchor=(0.5, -0.25),
+                               loc='upper center',
+                               ncol=2,
+                               fontsize=9)
 
+        # Обработчик движения мыши для отображения информации
+        def on_motion(event):
+            if event.inaxes == ax:
+                for line in ax.lines:
+                    if line.contains(event)[0]:
+                        x, y = line.get_data()
+                        idx = np.argmin(np.abs(x - event.xdata))
+                        info_text.set(f"{city}, {int(x[idx])} год: {y[idx]:.0f} ₽/м²")
+                        break
+                else:
+                    for collection in ax.collections:
+                        if collection.contains(event)[0]:
+                            x = collection.get_offsets()[:, 0]
+                            y = collection.get_offsets()[:, 1]
+                            info_text.set(f"Прогноз {city}, 2025 год: {y[0]:.0f} ₽/м²")
+                            break
+
+        fig.canvas.mpl_connect('motion_notify_event', on_motion)
+
+        # Встраиваем график в интерфейс
         canvas = FigureCanvasTkAgg(fig, master=frame_graph)
         canvas.draw()
-        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         # Запускаем анимацию
-        ani = animation.FuncAnimation(fig, animate, frames=len(df["year"]) + 30, interval=100, repeat=False)
+        global anim
+        anim = animation.FuncAnimation(fig, animate, frames=len(df["year"]) + 45, interval=50, repeat=False)
 
+        # Описание города
         description, wiki_url = get_city_info(city)
-        description_label.config(text=description)
-        if wiki_url:
-            link_button.config(state="normal", command=lambda: open_wiki(wiki_url))
-        else:
-            link_button.config(state="disabled")
+        desc_frame = tk.Frame(frame_graph, bg=theme.colors["bg"])
+        desc_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
 
-        show_bar_chart_button.config(state="normal", command=lambda: show_bar_chart(city))
-        delete_city_btn.config(state="normal", command=lambda: confirm_delete_city(city))
+        tk.Label(desc_frame, text=description, wraplength=700, justify=tk.LEFT,
+                 bg=theme.colors["bg"], fg=theme.colors["text_secondary"], font=FONT).pack(side=tk.LEFT)
+
+        # Кнопки управления
+        btn_frame = tk.Frame(frame_graph, bg=theme.colors["bg"])
+        btn_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        if wiki_url:
+            SmoothButton(btn_frame, text="Википедия", width=100,
+                         command=lambda: open_wiki(wiki_url)).pack(side=tk.LEFT, padx=5)
+
+        SmoothButton(btn_frame, text="Диаграмма", width=100,
+                     command=lambda: show_bar_chart(city)).pack(side=tk.LEFT, padx=5)
+
+        SmoothButton(btn_frame, text="Удалить", width=100, bg_color=theme.colors["danger"],
+                     hover_color="#ab4a4a", command=lambda: confirm_delete_city(city)).pack(side=tk.RIGHT, padx=5)
 
         # Убираем анимацию загрузки
         loading.stop_animation()
@@ -568,30 +625,53 @@ def plot_forecast(city):
 
 def show_bar_chart(city):
     try:
+        # Показываем анимацию загрузки
+        loading_window = tk.Toplevel(root)
+        loading_window.title("Построение диаграммы...")
+        loading_window.geometry("200x100")
+        loading_window.resizable(False, False)
+        loading_window.configure(bg=theme.colors["bg"])
+
+        tk.Label(loading_window, text="Построение диаграммы...",
+                 bg=theme.colors["bg"], fg=theme.colors["text"]).pack(pady=10)
+
+        loading_anim = LoadingAnimation(loading_window, size=50, color=theme.colors["accent"])
+        loading_anim.pack()
+
+        loading_window.update()
+
         df = get_city_data(city)
         if df.empty:
             messagebox.showerror("Ошибка", f"Нет данных для города {city}")
+            loading_window.destroy()
             return
 
-        fig, ax = plt.subplots(figsize=(8, 6), dpi=100)
-        fig.patch.set_facecolor(theme.current["graph_bg"])
-        ax.set_facecolor(theme.current["graph_bg"])
+        fig, ax = plt.subplots(figsize=(8, 5), dpi=100)
+        fig.patch.set_facecolor(theme.colors["graph_bg"])
+        ax.set_facecolor(theme.colors["graph_bg"])
 
-        bars = ax.bar(df["year"], df["average_price"], color=theme.current["accent"])
+        bars = ax.bar(df["year"], df["average_price"], color=theme.colors["accent"])
 
-        ax.set_title(f"Цены за м² в {city} по годам", fontsize=14, color=theme.current["graph_text"])
-        ax.set_xlabel("Год", fontsize=12, color=theme.current["graph_text"])
-        ax.set_ylabel("Цена, ₽/м²", fontsize=12, color=theme.current["graph_text"])
-        ax.grid(True, axis='y', color='gray' if theme.current == theme.dark else 'lightgray')
+        ax.set_title(f"Цены за м² в {city}", fontsize=12, color=theme.colors["text"])
+        ax.set_xlabel("Год", fontsize=10, color=theme.colors["text"])
+        ax.set_ylabel("Цена, ₽/м²", fontsize=10, color=theme.colors["text"])
+        ax.grid(True, axis='y', color=theme.colors["graph_grid"], linestyle='--', alpha=0.5)
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
 
         # Настройка цветов осей
-        ax.spines['bottom'].set_color(theme.current["graph_text"])
-        ax.spines['top'].set_color(theme.current["graph_text"])
-        ax.spines['right'].set_color(theme.current["graph_text"])
-        ax.spines['left'].set_color(theme.current["graph_text"])
-        ax.tick_params(axis='x', colors=theme.current["graph_text"])
-        ax.tick_params(axis='y', colors=theme.current["graph_text"])
+        for spine in ax.spines.values():
+            spine.set_color(theme.colors["text"])
+        ax.tick_params(colors=theme.colors["text"])
+
+        # Информационное окно
+        info_text = tk.StringVar()
+        info_text.set("Наведите курсор на столбцы для информации")
+
+        info_frame = tk.Frame(loading_window, bg=theme.colors["tooltip_bg"], padx=10, pady=5)
+        info_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        tk.Label(info_frame, textvariable=info_text, bg=theme.colors["tooltip_bg"],
+                 fg=theme.colors["tooltip_text"], font=FONT_SMALL).pack()
 
         # Добавляем подсказки
         def hover(event):
@@ -600,29 +680,33 @@ def show_bar_chart(city):
                     if bar.contains(event)[0]:
                         year = int(bar.get_x() + bar.get_width() / 2)
                         price = bar.get_height()
-                        ax.set_title(f"{city}: {year} год - {price:.0f} ₽/м²",
-                                     fontsize=14, color=theme.current["graph_text"])
-                        fig.canvas.draw_idle()
+                        info_text.set(f"{city}, {year} год: {price:.0f} ₽/м²")
                         break
 
         fig.canvas.mpl_connect("motion_notify_event", hover)
 
-        # Создаем новое окно для диаграммы
+        # Закрываем окно загрузки и открываем диаграмму
+        loading_window.destroy()
+
         chart_window = tk.Toplevel(root)
         chart_window.title(f"Диаграмма цен - {city}")
         chart_window.geometry("800x600")
-        chart_window.configure(bg=theme.current["bg"])
+        chart_window.configure(bg=theme.colors["bg"])
 
         canvas = FigureCanvasTkAgg(fig, master=chart_window)
         canvas.draw()
-        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Стилизованная кнопка закрытия
-        close_button = ModernButton(chart_window, text="Закрыть", command=chart_window.destroy)
-        close_button.pack(pady=10)
+        # Кнопка закрытия
+        btn_frame = tk.Frame(chart_window, bg=theme.colors["bg"])
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        SmoothButton(btn_frame, text="Закрыть", command=chart_window.destroy).pack()
 
     except Exception as e:
         messagebox.showerror("Ошибка", f"Произошла ошибка: {str(e)}")
+        if 'loading_window' in locals():
+            loading_window.destroy()
 
 
 # Подтверждение удаления города
@@ -630,17 +714,13 @@ def confirm_delete_city(city):
     if messagebox.askyesno("Подтверждение", f"Вы уверены, что хотите удалить город {city} из базы данных?"):
         if delete_city_from_db(city):
             update_city_list()
-            # Очищаем график и информацию о городе
+            # Очищаем график
             for widget in frame_graph.winfo_children():
-                if isinstance(widget, FigureCanvasTkAgg):
-                    widget.get_tk_widget().destroy()
-                elif widget not in [description_label, link_button, show_bar_chart_button, control_frame, button_frame]:
-                    widget.destroy()
+                widget.destroy()
 
-            description_label.config(text="Выберите город для отображения данных")
-            link_button.config(state="disabled")
-            show_bar_chart_button.config(state="disabled")
-            delete_city_btn.config(state="disabled")
+            # Добавляем сообщение о выборе города
+            tk.Label(frame_graph, text="Выберите город для отображения данных",
+                     bg=theme.colors["bg"], fg=theme.colors["text_secondary"], font=FONT_TITLE).pack(pady=50)
 
 
 # Обработка выбора города
@@ -672,25 +752,26 @@ def add_city():
     add_city_window = tk.Toplevel(root)
     add_city_window.title("Добавить новый город")
     add_city_window.geometry("500x650")
-    add_city_window.configure(bg=theme.current["bg"])
+    add_city_window.configure(bg=theme.colors["bg"])
     add_city_window.resizable(False, False)
 
     # Стилизованный заголовок
-    header = tk.Frame(add_city_window, bg=theme.current["button"])
+    header = tk.Frame(add_city_window, bg=theme.colors["accent"])
     header.pack(fill=tk.X)
-    tk.Label(header, text="Добавление нового города", bg=theme.current["button"],
+    tk.Label(header, text="Добавление нового города", bg=theme.colors["accent"],
              fg="white", font=FONT_TITLE).pack(pady=10)
 
     # Основной контейнер
-    container = tk.Frame(add_city_window, bg=theme.current["bg"])
+    container = tk.Frame(add_city_window, bg=theme.colors["bg"])
     container.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
 
     def create_entry_row(parent, label_text):
-        frame = tk.Frame(parent, bg=theme.current["bg"])
+        frame = tk.Frame(parent, bg=theme.colors["bg"])
         frame.pack(fill=tk.X, pady=5)
-        tk.Label(frame, text=label_text, bg=theme.current["bg"], font=FONT,
-                 fg=theme.current["text"], width=25, anchor="w").pack(side=tk.LEFT)
-        entry = ttk.Entry(frame, font=FONT, background=theme.current["entry_bg"])
+        tk.Label(frame, text=label_text, bg=theme.colors["bg"], font=FONT,
+                 fg=theme.colors["text"], width=25, anchor="w").pack(side=tk.LEFT)
+        entry = tk.Entry(frame, bg=theme.colors["entry_bg"], fg=theme.colors["text"],
+                         insertbackground=theme.colors["text"], relief=tk.FLAT)
         entry.pack(side=tk.RIGHT, fill=tk.X, expand=True)
         return entry
 
@@ -704,17 +785,17 @@ def add_city():
     price_2024_entry = create_entry_row(container, "Цена за м² в 2024:")
 
     # Описание
-    tk.Label(container, text="Описание города:", bg=theme.current["bg"],
-             font=FONT, fg=theme.current["text"], anchor="w").pack(fill=tk.X, pady=5)
-    description_text = tk.Text(container, height=5, font=FONT, bg=theme.current["entry_bg"],
-                               fg=theme.current["text"])
+    tk.Label(container, text="Описание города:", bg=theme.colors["bg"],
+             font=FONT, fg=theme.colors["text"], anchor="w").pack(fill=tk.X, pady=5)
+    description_text = tk.Text(container, height=5, font=FONT, bg=theme.colors["entry_bg"],
+                               fg=theme.colors["text"])
     description_text.pack(fill=tk.X, pady=5)
 
     # Ссылка на Википедию
     wiki_entry = create_entry_row(container, "Ссылка на Википедию:")
 
     # Кнопки
-    button_frame = tk.Frame(container, bg=theme.current["panel"])
+    button_frame = tk.Frame(container, bg=theme.colors["panel"])
     button_frame.pack(fill=tk.X, pady=20, padx=5, ipady=10)
 
     def save_city():
@@ -743,11 +824,11 @@ def add_city():
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при сохранении: {str(e)}")
 
-    save_btn = ModernButton(button_frame, text="Сохранить", command=save_city)
+    save_btn = SmoothButton(button_frame, text="Сохранить", command=save_city)
     save_btn.pack(side=tk.RIGHT, padx=10)
 
-    cancel_btn = ModernButton(button_frame, text="Отмена", command=add_city_window.destroy,
-                              bg_color="#95a5a6", hover_color="#7f8c8d")
+    cancel_btn = SmoothButton(button_frame, text="Отмена", command=add_city_window.destroy,
+                              bg_color="#5a5a5a", hover_color="#6a6a6a")
     cancel_btn.pack(side=tk.RIGHT)
 
 
@@ -755,8 +836,8 @@ def add_city():
 def show_help():
     help_window = tk.Toplevel(root)
     help_window.title("Справка по приложению")
-    help_window.geometry("700x600")
-    help_window.configure(bg=theme.current["bg"])
+    help_window.geometry("800x700")
+    help_window.configure(bg=theme.colors["bg"])
     help_window.resizable(False, False)
 
     # Создаем Notebook (вкладки)
@@ -764,72 +845,86 @@ def show_help():
     notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
     # Вкладка о формате файла
-    file_frame = tk.Frame(notebook, bg=theme.current["bg"])
-    notebook.add(file_frame, text="Формат TXT файла")
+    file_frame = tk.Frame(notebook, bg=theme.colors["bg"])
+    notebook.add(file_frame, text="Формат данных")
 
-    tk.Label(file_frame, text="Пример содержимого TXT файла:",
-             bg=theme.current["bg"], font=FONT_BOLD, fg=theme.current["text"],
+    tk.Label(file_frame, text="Поддерживаемые форматы данных:",
+             bg=theme.colors["bg"], font=FONT_BOLD, fg=theme.colors["text"],
              anchor="w").pack(fill=tk.X, pady=10, padx=10)
+
+    # Формат TXT
+    tk.Label(file_frame, text="Текстовый файл (TXT):",
+             bg=theme.colors["bg"], font=FONT_BOLD, fg=theme.colors["accent"],
+             anchor="w").pack(fill=tk.X, padx=10, pady=(10, 5))
 
     example_text = """[
     ("Москва", 2020, 195000, "Столица России", "https://ru.wikipedia.org/wiki/Москва"),
     ("Москва", 2021, 210000, "Столица России", "https://ru.wikipedia.org/wiki/Москва"),
-    ("Москва", 2022, 230000, "Столица России", "https://ru.wikipedia.org/wiki/Москва"),
-    ("Санкт-Петербург", 2020, 120000, "Северная столица", "https://ru.wikipedia.org/wiki/Санкт-Петербург"),
-    ("Санкт-Петербург", 2021, 125000, "Северная столица", "https://ru.wikipedia.org/wiki/Санкт-Петербург")
+    ("Санкт-Петербург", 2020, 120000, "Северная столица", "https://ru.wikipedia.org/wiki/Санкт-Петербург")
 ]"""
 
-    text_widget = tk.Text(file_frame, height=15, width=80, font=("Consolas", 10), wrap=tk.WORD,
-                          bg=theme.current["entry_bg"], fg=theme.current["text"])
+    text_widget = tk.Text(file_frame, height=8, width=80, font=("Consolas", 10), wrap=tk.WORD,
+                          bg=theme.colors["entry_bg"], fg=theme.colors["text"])
     text_widget.insert(tk.END, example_text)
     text_widget.config(state="disabled")
-    text_widget.pack(padx=10, pady=5, fill=tk.BOTH, expand=True)
+    text_widget.pack(padx=10, pady=5, fill=tk.X)
 
-    tk.Label(file_frame, text="Файл должен содержать список кортежей, где каждый кортеж состоит из:",
-             bg=theme.current["bg"], font=FONT, fg=theme.current["text"],
-             anchor="w").pack(fill=tk.X, padx=10)
+    # Формат JSON
+    tk.Label(file_frame, text="JSON файл:",
+             bg=theme.colors["bg"], font=FONT_BOLD, fg=theme.colors["accent"],
+             anchor="w").pack(fill=tk.X, padx=10, pady=(10, 5))
 
-    tk.Label(file_frame,
-             text="1. Название города\n2. Год (2020-2024)\n3. Средняя цена за м²\n4. Описание города\n5. Ссылка на Википедию",
-             bg=theme.current["bg"], font=FONT, fg=theme.current["text"],
-             anchor="w", justify=tk.LEFT).pack(fill=tk.X, padx=20, pady=5)
+    example_json = """[
+    ["Москва", 2020, 195000, "Столица России", "https://ru.wikipedia.org/wiki/Москва"],
+    ["Москва", 2021, 210000, "Столица России", "https://ru.wikipedia.org/wiki/Москва"],
+    ["Санкт-Петербург", 2020, 120000, "Северная столица", "https://ru.wikipedia.org/wiki/Санкт-Петербург"]
+]"""
+
+    json_widget = tk.Text(file_frame, height=8, width=80, font=("Consolas", 10), wrap=tk.WORD,
+                          bg=theme.colors["entry_bg"], fg=theme.colors["text"])
+    json_widget.insert(tk.END, example_json)
+    json_widget.config(state="disabled")
+    json_widget.pack(padx=10, pady=5, fill=tk.X)
 
     # Вкладка о функционале
-    func_frame = tk.Frame(notebook, bg=theme.current["bg"])
-    notebook.add(func_frame, text="Функционал приложения")
+    func_frame = tk.Frame(notebook, bg=theme.colors["bg"])
+    notebook.add(func_frame, text="Функционал")
 
     info_text = """Приложение для анализа цен на недвижимость в городах России:
 
-Основные функции:
-1. Просмотр динамики цен по годам
-2. Прогноз цен на 2025 год (базовый, оптимистичный и пессимистичный)
-3. Добавление новых городов в базу данных
-4. Удаление городов из базы данных
-5. Загрузка данных из текстового файла
-6. Просмотр дополнительной информации о городах
+Основные возможности:
+1. Визуализация динамики цен по годам
+2. Прогнозирование цен на 2025 год (3 сценария)
+3. Интерактивные графики с подсказками
+4. Управление базой данных городов
+5. Импорт/экспорт данных в различных форматах
 
 График показывает:
-- Исторические данные (точки с фактическими ценами)
-- Базовый тренд (линейная регрессия)
-- Оптимистичный прогноз (+15% к данным)
-- Пессимистичный прогноз (-15% к данным)
-- Прогнозируемые цены на 2025 год
+- Фактические цены по годам (синие точки)
+- Базовый прогноз (зеленая линия)
+- Оптимистичный сценарий (+15%, оранжевая линия)
+- Пессимистичный сценарий (-15%, красная линия)
+- Прогнозируемые значения на 2025 год
 
-Кнопки:
-- 'Добавить город' - ручной ввод данных о новом городе
-- 'Удалить город' - удаление выбранного города из базы
-- 'Загрузить из TXT' - импорт данных из текстового файла
-- 'Перейти на Википедию' - открытие страницы города
-- 'Показать диаграмму' - отображение столбчатой диаграммы цен"""
+Инструкция:
+1. Выберите город из списка слева
+2. Изучите график и прогноз
+3. Используйте кнопки под графиком для дополнительных действий
+4. Добавляйте новые города через меню "Добавить город"
+
+Форматы данных:
+- TXT: список кортежей в Python-формате
+- JSON: массив записей в формате JSON
+Каждая запись содержит: город, год, цену, описание, ссылку"""
 
     text_widget = tk.Text(func_frame, height=25, width=80, font=FONT, wrap=tk.WORD,
-                          bg=theme.current["entry_bg"], fg=theme.current["text"])
+                          bg=theme.colors["entry_bg"], fg=theme.colors["text"])
     text_widget.insert(tk.END, info_text)
     text_widget.config(state="disabled")
     text_widget.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
 
     # Кнопка закрытия
-    close_btn = ModernButton(help_window, text="Закрыть", command=help_window.destroy)
+    close_btn = SmoothButton(help_window, text="Закрыть", command=help_window.destroy)
     close_btn.pack(pady=10)
 
 
@@ -842,131 +937,72 @@ def update_city_list():
         city_listbox.insert(tk.END, city)
 
 
-# Функция для переключения темы
-def toggle_theme():
-    new_theme = theme.toggle()
-
-    # Обновляем цвета главного окна
-    root.config(bg=new_theme["bg"])
-    frame_left.config(bg=new_theme["panel"])
-    frame_graph.config(bg=new_theme["bg"])
-    control_frame.config(bg=new_theme["bg"])
-    button_frame.config(bg=new_theme["panel"])
-
-    # Обновляем цвета виджетов
-    city_search_label.config(bg=new_theme["panel"], fg=new_theme["text"])
-    city_listbox.config(bg=new_theme["panel"], fg=new_theme["text"],
-                        selectbackground=new_theme["button_hover"])
-    description_label.config(bg=new_theme["bg"], fg=new_theme["text"])
-
-    # Обновляем кнопки
-    for btn in [add_city_btn, delete_city_btn, load_txt_btn, help_btn,
-                theme_btn, link_button, show_bar_chart_button]:
-        btn.config(bg_color=new_theme["button" if btn not in [delete_city_btn, theme_btn] else "delete"],
-                   hover_color=new_theme["button_hover" if btn not in [delete_city_btn, theme_btn] else "delete_hover"],
-                   fg_color="white")
-        btn.draw_button()
-
-    # Обновляем тему графика, если он есть
-    for widget in frame_graph.winfo_children():
-        if isinstance(widget, FigureCanvasTkAgg):
-            plot_forecast(city_listbox.get(city_listbox.curselection()))
-            break
-
-
-# --- Создание основного интерфейса ---
+# Создание главного окна
 root = tk.Tk()
-root.title("Прогноз цен на недвижимость в городах России")
-root.configure(bg=theme.current["bg"])
-root.geometry("1100x800")
+root.title("Анализ цен на недвижимость")
+root.geometry("1200x800")
+root.configure(bg=theme.colors["bg"])
 
-# Установка иконки (если есть)
-try:
-    root.iconbitmap("home_icon.ico")
-except:
-    pass
+# Верхняя панель
+top_frame = tk.Frame(root, bg=theme.colors["panel"], height=50)
+top_frame.pack(fill=tk.X, padx=10, pady=10)
 
-# Стилизация
-style = ttk.Style()
-style.theme_use("clam")
-style.configure("TFrame", background=theme.current["bg"])
-style.configure("TLabel", background=theme.current["bg"], font=FONT,
-                foreground=theme.current["text"])
-style.configure("TEntry", font=FONT, fieldbackground=theme.current["entry_bg"],
-                foreground=theme.current["text"])
-style.configure("TButton", font=FONT_BOLD, padding=6)
+# Кнопки управления
+SmoothButton(top_frame, text="Добавить город", width=140,
+             command=add_city).pack(side=tk.LEFT, padx=5)
 
-# Верхняя панель с кнопками
-top_frame = tk.Frame(root, bg=theme.current["panel"], height=60)
-top_frame.pack(fill=tk.X, padx=10, pady=(10, 0))
+SmoothButton(top_frame, text="Импорт TXT", width=100,
+             command=load_from_txt).pack(side=tk.LEFT, padx=5)
 
-# Кнопки в верхней панели
-buttons = [
-    ("Добавить город", add_city, theme.current["button"], theme.current["button_hover"]),
-    ("Удалить город", lambda: confirm_delete_city(city_listbox.get(tk.ACTIVE)),
-     theme.current["delete"], theme.current["delete_hover"]),
-    ("Загрузить TXT", load_from_txt, "#2ecc71", "#27ae60"),  # Укороченный текст
-    ("Загрузить JSON", load_from_json, "#2ecc71", "#27ae60"),
-    ("Экспорт TXT", export_to_txt, "#3498db", "#2980b9"),  # Укороченный текст
-    ("Экспорт JSON", export_to_json, "#3498db", "#2980b9"),
-    ("Справка", show_help, "#9b59b6", "#8e44ad"),
-    ("Тема", toggle_theme, "#34495e", "#2c3e50")  # Укороченный текст
-]
+SmoothButton(top_frame, text="Импорт JSON", width=100,
+             command=load_from_json).pack(side=tk.LEFT, padx=5)
 
-for text, cmd, bg, hov in buttons:
-    btn = ModernButton(top_frame, text=text, command=cmd, width=140, height=40,
-                      bg_color=bg, hover_color=hov)
-    btn.pack(side=tk.LEFT, padx=5, pady=10)
+SmoothButton(top_frame, text="Экспорт TXT", width=100,
+             command=export_to_txt).pack(side=tk.LEFT, padx=5)
 
-# Сохраняем ссылки на важные кнопки
-add_city_btn = buttons[0][2]
-delete_city_btn = buttons[1][2]
-load_txt_btn = buttons[2][2]
-help_btn = buttons[6][2]
-theme_btn = buttons[7][2]
+SmoothButton(top_frame, text="Экспорт JSON", width=100,
+             command=export_to_json).pack(side=tk.LEFT, padx=5)
 
-# Левый фрейм: выбор города
-frame_left = tk.Frame(root, bg=theme.current["panel"], bd=0, relief=tk.RIDGE)
-frame_left.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
+SmoothButton(top_frame, text="Справка", width=80,
+             command=show_help).pack(side=tk.RIGHT, padx=5)
 
-city_search_label = tk.Label(frame_left, text="Поиск города:", bg=theme.current["panel"],
-                             font=FONT_BOLD, fg=theme.current["text"])
-city_search_label.pack(anchor="w", pady=(5, 0), padx=5)
+# Основное содержимое
+main_frame = tk.Frame(root, bg=theme.colors["bg"])
+main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+
+# Левая панель - список городов
+left_panel = tk.Frame(main_frame, bg=theme.colors["panel"], width=280)
+left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+
+tk.Label(left_panel, text="Поиск города:", bg=theme.colors["panel"],
+         fg=theme.colors["text"], font=FONT_BOLD).pack(pady=(10, 5), padx=10, anchor="w")
 
 city_search_var = tk.StringVar()
-city_search_entry = ttk.Entry(frame_left, textvariable=city_search_var)
-city_search_entry.pack(fill=tk.X, pady=5, padx=5)
-city_search_entry.bind("<KeyRelease>", filter_cities)
+search_entry = tk.Entry(left_panel, bg=theme.colors["entry_bg"], fg=theme.colors["text"],
+                        insertbackground=theme.colors["text"], relief=tk.FLAT,
+                        textvariable=city_search_var)
+search_entry.pack(fill=tk.X, padx=10, pady=(0, 10))
+search_entry.bind("<KeyRelease>", filter_cities)
 
-city_listbox = AnimatedListbox(frame_left, height=30, exportselection=False)
-city_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-city_listbox.bind("<ButtonRelease-1>", on_city_select)
+scrollbar = tk.Scrollbar(left_panel)
+scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-# Правый фрейм: график
-frame_graph = tk.Frame(root, bg=theme.current["bg"], bd=0, relief=tk.RIDGE)
-frame_graph.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+city_listbox = CityListbox(left_panel, yscrollcommand=scrollbar.set, height=30)
+city_listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+city_listbox.bind("<<ListboxSelect>>", on_city_select)
 
-# Элементы управления графиком
-control_frame = tk.Frame(frame_graph, bg=theme.current["bg"])
-control_frame.pack(fill=tk.X)
+scrollbar.config(command=city_listbox.yview)
 
-description_label = tk.Label(frame_graph, text="Выберите город для отображения данных",
-                             bg=theme.current["bg"], font=FONT, wraplength=800,
-                             justify=tk.LEFT, fg=theme.current["text"])
-description_label.pack(pady=10)
+# Правая панель - график
+frame_graph = tk.Frame(main_frame, bg=theme.colors["bg"])
+frame_graph.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-button_frame = tk.Frame(frame_graph, bg=theme.current["panel"])
-button_frame.pack(fill=tk.X, pady=5, padx=5, ipady=5)
-
-link_button = ModernButton(button_frame, text="Перейти на Википедию", width=150)
-link_button.pack(side=tk.LEFT, padx=5)
-link_button.config(state="disabled")
-
-show_bar_chart_button = ModernButton(button_frame, text="Показать диаграмму", width=150)
-show_bar_chart_button.pack(side=tk.LEFT, padx=5)
-show_bar_chart_button.config(state="disabled")
+# Начальное сообщение
+tk.Label(frame_graph, text="Выберите город для отображения данных",
+         bg=theme.colors["bg"], fg=theme.colors["text_secondary"], font=FONT_TITLE).pack(pady=50)
 
 # Загрузка данных
+create_database()
 all_cities = get_cities()
 update_city_list()
 
